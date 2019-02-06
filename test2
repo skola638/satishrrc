@@ -56,12 +56,10 @@ else:
 ## Pandas column definitions
 
 ## List of outputgcanonical for column names for a transformed CDR
-g_col_list = [ \
-   'rcd_type', 'id', 'company_id', 'mdn', 'esn', 'dialed_digits', 'term_min', 'switch_id', 'switch_type', 'cell_site', \
+g_col_list = ['rcd_type', 'id', 'company_id', 'mdn', 'esn', 'dialed_digits', 'term_min', 'switch_id', 'switch_type', 'cell_site', \
    'home_ind', 'orig_sid', 'orig_cc', 'term_cc', 'call_dirtion', 'carrier_code', 'answer_time', 'release_time', 'call_start_utc', \
    'call_end_utc', 'call_dur_mou', 'call_fwd_ind', 'three_way_call_ind', 'call_wait_ind', 'utc_offset_db', 'imsi', 'imei', \
-   'enode_id', 'msc_id', 'billing_system_id' \
-]
+   'enode_id', 'msc_id', 'billing_system_id' ]
 
 
 g_col_dict = {
@@ -72,7 +70,34 @@ g_col_dict = {
    'enode_id':str, 'msc_id':str, 'billing_system_id':str \
 }
 
+vdu_columns = ['mdn', 'home_ind', 'orig_cc',
+                     'term_cc', 'origin_domesitc_indicator', 'term_domesitc_indicator',
+                     'call_start_utc', 'counts', 'mou', 'now', 'now', 'billing_system_id']
+group_columns = ['mdn', 'home_ind', 'orig_cc', 'term_cc', 'call_start_utc', 'billing_system_id']
+## Handler - Called from main
 
+def make_vdu_data_set(data_frame):
+    import pdb;pdb.set_trace()
+    data_frame = data_frame.groupby(group_columns).size().reset_index(name='counts')
+    vdu_d_frames = []
+    for index, row in enumerate(data_frame.values):
+        mdn, home_ind, orig_cc, term_cc, call_start_utc, billing_system_id, counts = row
+        origin_domesitc_indicator = 1
+        if orig_cc.lower() == "usa":
+            origin_domesitc_indicator = 0
+
+        term_domesitc_indicator = 1
+        if term_cc.lower() == "usa":
+            term_domesitc_indicator = 0
+        now = str(datetime.now())
+        data_row = [mdn, home_ind, orig_cc,
+                     term_cc, origin_domesitc_indicator, term_domesitc_indicator,
+                     call_start_utc, counts, '', now, now, billing_system_id]
+
+        vdu_df = pd.DataFrame([data_row], columns=vdu_columns)
+        vdu_d_frames.append(vdu_df)
+    vdu_d_frames = pd.concat(vdu_d_frames)
+    print vdu_d_frames
 
 ## Handler - Called from main
 
@@ -105,9 +130,9 @@ def load_retail(event, context):
          cdr_list.append(cdr)
 
 
-    df = pd.DataFrame([cdr_in_list.split("|") for cdr_in_list in cdr_list])
-    #df = pd.DataFrame([cdr_in_list.split("|") for cdr_in_list in cdr_list], names=g_col_list, dtype=g_col_dict)
-    print(df)
+    #df = pd.DataFrame([cdr_in_list.split("|") for cdr_in_list in cdr_list]])
+    df = pd.DataFrame([cdr_in_list.split("|")[:-1] for cdr_in_list in cdr_list], columns=g_col_list)
+    make_vdu_data_set(df)
 
     g_log.debug('Completed load_retail handler')
 
