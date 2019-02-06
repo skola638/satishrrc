@@ -78,7 +78,6 @@ group_columns = ['mdn', 'home_ind', 'orig_cc', 'term_cc', 'call_start_utc', 'bil
 ## Handler - Called from main
 
 def make_vdu_data_set(data_frame):
-    import pdb;pdb.set_trace()
     data_frame = data_frame.groupby(group_columns).size().reset_index(name='counts')
     vdu_d_frames = []
     for index, row in enumerate(data_frame.values):
