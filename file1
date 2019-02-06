@@ -260,7 +260,7 @@ def vdu_execute_batch(data_frame):
 
         query_str = ""
         if index == 0:
-            query_str = '{}'.format("nextval('voice_daily_usage')")
+            query_str = '{}'.format("nextval('voice_daily_usage_id')")
         query_str += "'" + MDN + "', "
         query_str += "'" + ROAMING_INDICATOR + "', "
         query_str += "'" + ORIGIN_COUNTRY_CODE + "', "
