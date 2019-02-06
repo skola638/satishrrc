@@ -1,0 +1,354 @@
+import sys
+import os
+import time
+import boto3
+import datetime
+import csv
+from common import log as logger
+
+sys.path.append('./packages')
+import pandas as pd
+import psycopg2, psycopg2.extras
+
+from common import rds_pg
+
+# Set ENV variables
+os.environ['https_proxy'] = 'http://proxy.ebiz.verizon.com:80'
+os.environ['http_proxy'] = 'http://proxy.ebiz.verizon.com:80'
+os.environ['NO_PROXY'] = '169.254.169.254'
+
+## SQS
+g_env_retlIQ1_sqs_url = os.environ['RETL_IQ1_SQS_URL']
+# Number of messages per batch
+try :
+    g_env_msg_batch_cnt = int(os.environ['SQS_MSG_BATCH_CNT'])
+except :
+    g_env_msg_batch_cnt = 10
+
+'''#-- not used
+g_env_rslrIQ1_sqs_url = os.environ['RSLR_IQ1_SQS_URL']
+g_env_rslrDQ1_sqs_url = os.environ['RSLR_DQ1_SQS_URL']
+g_env_msg_grpid       = os.environ['SQS_MSG_GRPID']
+# Number of CDRS per messages
+g_env_msg_cdr_cnt     = int(os.environ['SQS_MSG_CDR_CNT'])
+'''
+
+## Logging ENV variables
+g_env_disable_logging = os.environ['LOGGING_DISABLE']
+g_env_logging_level   = os.environ['LOGGING_LEVEL']
+
+g_debug_ind = True if g_env_logging_level.upper() == 'DEBUG' else False
+
+# Configure the logger to write to stdout (config 1)
+g_log = logger.init_config_1(g_env_logging_level)
+
+
+### Create SQS client
+g_sqs = boto3.client('sqs', region_name='us-east-1')
+
+### initialize PG clients cursors
+g_ENFINW_conn, g_ENFINW_cur = rds_pg.pg_connect('NW')
+#g_ENFIRE_conn, g_ENFIRE_cur = rds_pg.pg_connect('RE')
+
+### List of input column names and data types for the Pandas dataframe
+g_col_list = [
+    'rcd_type', 'id', 'company_id', 'orig_mdn', 'esn_meid', 'dialed_digits', \
+    'term_min', 'switch_id', 'switch_type', 'cell_site', 'roam_ind', 'orig_sid', \
+    'term_cc', 'call_direction', 'carrier_code', 'call_start', 'call_end', \
+    'call_start_utc', 'call_end_utc', 'call_duration', 'call_forwarding', \
+    'three_way_calling', 'call_waiting', 'utc_offset', 'imsi', 'imei', 'enode_id', \
+    'msc_id', 'billing_system_id' ]
+
+
+g_csv_dict = {
+    'rcd_type': str, 'id': str, 'company_id': str, 'orig_mdn' : str, \
+    'esn_meid': str, 'dialed_digits': str, 'term_min': str, 'switch_id': str, \
+    'switch_type': str, 'cell_site': str, 'roam_ind': str, 'orig_sid': str, \
+    'term_cc': str, 'call_direction': str, 'carrier_code': str, 'call_start': str, \
+    'call_end': str, 'call_start_utc': str, 'call_end_utc': str, 'call_duration': str, \
+    'call_forwarding': str, 'three_way_calling': str, 'call_waiting' : str, \
+    'utc_offset': str, 'imsi': str, 'imei': str, 'enode_id': str, \
+    'msc_id': str, 'billing_system_id': str }
+
+
+def sqs_get_metadata(event,msgCnt):
+
+    start_time = time.perf_counter()
+    g_log.debug('SQS META: Extracting SQS metadata from the SQS source object ...')
+
+    if (event == 'event') :   #-- unit test mode
+        sqs_Qurl = g_env_retlIQ1_sqs_url  #-- retail international
+        rcv_response = g_sqs.receive_message(QueueUrl=sqs_Qurl, \
+                           AttributeNames=['All'],  \
+                           MaxNumberOfMessages=1)  #--MaxNumberOfMessages range=1..10
+        #print(rcv_response)
+        '''#-- Response Syntax begin
+        {
+            'Messages': [
+                {
+                    'MessageId': 'string',
+                    'ReceiptHandle': 'string',
+                    'MD5OfBody': 'string',
+                    'Body': 'string',
+                    'Attributes': {
+                        'string': 'string'
+                    },
+               ....
+                },
+            ]
+        }
+        '''#-- Response Syntax end
+        if 'Messages' in rcv_response :
+            rcv_data = rcv_response['Messages'][0]['Body']
+            rcv_handle=rcv_response['Messages'][0]['ReceiptHandle']
+        else :
+            rcv_data = None
+            rcv_handle = None
+         
+    else :
+        if 'Records' in event :
+            '''#-- SQS event syntax begin
+            {
+                "Records": [
+                    {
+                        "messageId": "059f36b4-87a3-44ab-83d2-661975830a7d",
+                        "receiptHandle": "AQEBwJnKyrHigUMZj6rYigCgxlaS3SLy0a...",
+                        "body": "test",
+                        "attributes": {
+                            "ApproximateReceiveCount": "1",
+                            "SentTimestamp": "1545082649183",
+                            "SenderId": "AIDAIENQZJOLO23YVJ4VO",
+                            "ApproximateFirstReceiveTimestamp": "1545082649185"
+                        },
+                        "messageAttributes": {},
+                        "md5OfBody": "098f6bcd4621d373cade4e832627b4f6",
+                        "eventSource": "aws:sqs",
+                        "eventSourceARN": "arn:aws:sqs:us-east-2:123456789012:my-queue",
+                        "awsRegion": "us-east-2"
+                    },
+                    ...
+                ]
+            }
+            '''#-- SQS event syntax end
+            if 'body' in event['Records'][msgCnt] :
+                rcv_data=event['Records'][msgCnt]['body']
+            else :
+                rcv_data = None
+            if 'receiptHandle' in event['Records'][msgCnt] :
+                rcv_handle=event['Records'][msgCnt]['receiptHandle']
+            else :
+                rcv_handle = None
+        else :
+            rcv_data = None
+            rcv_handle = None
+            g_log.error('event empty')
+
+    g_log.debug('SQS : Metadata extracted from the SQS (elapsed time: ' + '{0:,.2f}' \
+                .format((time.perf_counter() - start_time) * 1000.0) + ' ms)')
+    
+    return rcv_data, rcv_handle
+
+#-- SQL for INTERNATIONAL_CDR table sequence
+#sql_RetailIntlSeq = "SELECT international_cdr_seq.nextval network_own.international_cdr 
+
+#-- SQL for INTERNATIONAL_CDR table insert
+# select international_cdr_seq.nextval returns INTERNATIONAL_CDR_ID
+sql_RetailIntl = """INSERT INTO network_own.international_cdr \
+          (INTERNATIONAL_CDR_ID, MDN, ESN_MEID, DIALED_DIGITS, TERMINATING_MSID, \
+          SWITCH_ID, SWITCH_TYPE, CELL_SITE, ROAMING_INDICATOR, ORIGIN_SID, \
+          ORIGIN_COUNTRY_CODE, TERM_COUNTRY_CODE, CALL_DIRECTION, CARRIER_CODE, \
+          BEGIN_TIME, END_TIME, BEGIN_TIME_UTC, END_TIME_UTC, MOU, \
+          CALL_FORWARDING, THREE_WAY_CALLING, CALL_WAITING, UTC_OFFSET, IMSI, \
+          IMEI, ENB_ID, MSCID, BILLING_SYSTEM_ID, TS_INSERTED) VALUES %s""" 
+
+#         (INTERNATIONAL_CDR_ID, MDN, ESN_MEID, DIALED_DIGITS, TERMINATING_MSID, \
+
+#-- status for DB inserts to newtork_own.INTERNATIONAL_CDR table
+g_db_nw_load_status=False
+
+#-- load records to INTERNATIONAL_CDR table
+def  pg_execute_batchRetIntlNW(myBatch) :
+    #g_ENFINW_conn, g_ENFINW_cur
+    global g_db_nw_load_status
+    try:
+        psycopg2.extras.execute_batch(g_ENFINW_cur, sql_RetailIntl, myBatch, page_size=5000)
+        g_ENFINW_conn.commit()
+        g_log.debug('SQS : Commit to INTERNATIONAL_CDR successful...')
+        g_db_nw_load_status=True
+
+    except psycopg2.Error as e:
+        g_ENFINW_conn.rollback()
+        g_log.debug('NW DB : Load to INTERNATIONAL_CDR failed ...')
+        g_log.debug('NW DB : Code:{0} Description:{1}'.format(e.pgcode, e.pgerror))
+        if '22P' in e.pgcode:  #-- delete the incorrectly sent messages
+            g_db_nw_load_status=True
+        else :
+            g_db_nw_load_status=False
+
+sqlStr_RetailIntl = "INSERT INTO network_own.international_cdr \
+    (INTERNATIONAL_CDR_ID, MDN, ESN_MEID, DIALED_DIGITS, TERMINATING_MSID, \
+     SWITCH_ID, SWITCH_TYPE, CELL_SITE, ROAMING_INDICATOR, ORIGIN_SID, \
+     ORIGIN_COUNTRY_CODE, TERM_COUNTRY_CODE, CALL_DIRECTION, CARRIER_CODE, \
+     BEGIN_TIME, END_TIME, BEGIN_TIME_UTC, END_TIME_UTC, MOU, \
+     CALL_FORWARDING, THREE_WAY_CALLING, CALL_WAITING, UTC_OFFSET, IMSI, \
+     IMEI, ENB_ID, MSCID, BILLING_SYSTEM_ID, TS_INSERTED) VALUES "
+
+
+def  pg_execute_strListRetIntlNW(myStrList) :
+    #g_ENFINW_conn, g_ENFINW_cur
+    global g_db_nw_load_status
+    try:
+        valBegin = '(nextval(\'international_cdr_seq\'), '
+        sqlValueStr=''
+        cnt=0
+        for myStr in myStrList :
+             if cnt > 0 : # add record seperator for next row
+                 sqlValueStr = sqlValueStr + ', '
+             cnt += 1
+             str_seq = valBegin + myStr + ')'
+             sqlValueStr += str_seq
+        print(sqlValueStr)  #-- comment later
+        g_ENFINW_cur.execute(sqlStr_RetailIntl + sqlValueStr )
+        g_ENFINW_conn.commit()
+        g_log.debug('NW DB : Commit to INTERNATIONAL_CDR successful...')
+        g_db_nw_load_status=True
+
+    except psycopg2.Error as e:
+        g_ENFINW_conn.rollback()
+        g_log.debug('NW DB : Load to INTERNATIONAL_CDR failed ...')
+        g_log.debug('NW DB : Code:{0} Description:{1}'.format(e.pgcode, e.pgerror))
+        if '22P' in e.pgcode:  
+            g_db_nw_load_status=True #-- delete the incorrectly sent messages
+        #-- Code:23505, ERROR: duplicate key value violates unique constraint...
+        elif '235' in e.pgcode:  
+            g_db_nw_load_status=True  #-- delete the incorrectly sent messages
+        #-- Code:42601 Description:ERROR:  syntax error at or near ...
+        else :
+            g_db_nw_load_status=False   #--Don't delete, warn the Developer
+        #g_db_nw_load_status=False  #-- unit test mode, to avoid having to re-populate SQS msg
+
+def sqs_delete_msg(rcv_handle):
+    sqs_Qurl = g_env_retlIQ1_sqs_url  #-- retail international
+    #-- delete the message from the SQS Q    
+    if rcv_handle != None  and g_db_nw_load_status == True :
+        g_log.debug('SQS : deleting the message ')
+        del_response=g_sqs.delete_message(QueueUrl=sqs_Qurl, \
+                         ReceiptHandle=rcv_handle)    #-- no op for success/failure
+
+### H a n d l er  ###
+
+def dil_sqs_retail_handler(event, context):
+
+    #print('event:[{}]'.format(event))
+
+    #global g_log
+
+    g_log.info('MAIN: Starting the dil_sqs_retail_handler')
+    g_log.debug('MAIN: Pandas version:' + pd.__version__)
+    g_log.debug('MAIN: Global debug indicator set to true')
+ 
+    # create a DF for storing wireless o/p formatted cdr
+    #df_cdr = pd.DataFrame(columns=g_col_list)  
+ 
+    max_msg_rcv_cnt=g_env_msg_batch_cnt  #-- set to SQS_MSG_BATCH_CNT
+    retlI_cnt=0 
+    tl_msg_cnt=0
+    get_msg_cnt=0
+    tl_row_cnt=0
+
+    for i in range(max_msg_rcv_cnt):
+        ## Get SQS event object information (input file)
+        mySqsData, mySqsHandle = sqs_get_metadata(event,i)
+        #print(mySqsData)
+        if mySqsData != None :
+            tl_msg_cnt += 1
+            #print(mySqsData)
+            #df_cdr = df_cdr.append( pd.Series( 
+            RI_list=[]
+            rcd_type=-1
+            for row in mySqsData.splitlines() : #--splits on \n
+                #-- init for List of tuples, to be used with pandas
+                tbl_data=[]
+                RI_cdr=[]
+                itemCnt = 0
+                tl_row_cnt += 1
+                #-- init for strings
+                tbl_data_str=""
+                strValCnt = 0
+                if row == '' : #-- if empty lines found
+                    g_log.debug('DIL Retail read: row is empty')
+                    continue
+                g_log.debug('DIL RI row : <{0}>'.format(row) )
+                for item in row.split('|') :
+                    itemCnt += 1
+                    #-- set record type, 1st field
+                    if itemCnt == 1 : 
+                        rcd_type=item
+                    #-- check for Retail International msgs, skip rcd_type & company_id
+                    if rcd_type == '0' and itemCnt == 2 :
+                        #tbl_data.append('international_cdr_seq.nextval') #-- in Oracle
+                        #tbl_data.append(nextval(\'international_cdr_seq\'))  #-- in postgres
+                        #mySeqId='nextval(\'international_cdr_seq\')'
+                        mySeqId='{}'.format("nextval('international_cdr_seq')")
+                        tbl_data.append(mySeqId)
+                    if rcd_type == '0' and itemCnt > 3 and itemCnt < 31:
+                         if strValCnt > 0 : # add value seperator for next item
+                             tbl_data_str = tbl_data_str + ', '
+                         strValCnt += 1
+                         if item == '': #-- if null fields
+                             tbl_data.append(None) 
+                             tbl_data_str += 'null'
+                         else :
+                             tbl_data.append(item) 
+                             tbl_data_str += "'" + item + "'"
+                ts_inserted = str(datetime.datetime.now())
+                tbl_data.append(ts_inserted) 
+                tbl_data_str += ", '" + ts_inserted + "'"
+                #g_log.debug('itemCnt:{} tbl_data_str:{}'.format(itemCnt,tbl_data_str))
+
+                if rcd_type == '0' :  #-- Retail International
+                    retlI_cnt += 1
+                    RI_cdr.append(tuple(tbl_data)) #-- add the tbl_data as single element like (a,b,...)
+                    #RI_list.append(RI_cdr)
+                    RI_list.append(tbl_data_str) #-- add the tbl_data_str as single element
+ 
+            if rcd_type == -1 :  #-- empty message
+                continue
+
+            ''' #-- unit test db code, trying add 2 cdrs in the batch
+            #-- case of list of tuples
+            RI_list=[]
+            #myItem='nextval(\'international_cdr_seq\')'
+            myItem='{}'.format("nextval('international_cdr_seq')")
+            RI_list.append([(myItem, '2461719485', 'A012006C2A75C3', '011919105300715', None, 'rlgh2', 'N', '0E9A', '1', '0', 'USA', 'IND', '1', 'vzw', '2018-07-25 13:52:00', '2018-07-25 13:52:29', '2018-07-25 18:52:00', '2018-07-25 18:52:29', '1', 'N', 'N', 'N', -5, None, None, None, None, 'P', '2019-01-16 14:57:40.263631')]) 
+            RI_list.append([(myItem,  '2461719486', 'A012006C2A75C3', '011919105300715', None, 'rlgh2', 'N', '0E9A', '1', '0', 'USA', 'IND', '1', 'vzw', '2018-07-26 13:52:00', '2018-07-26 13:52:29', '2018-07-26 18:52:00', '2018-07-26 18:52:29', '1', 'N', 'N', 'N', -6, None, None, None, None, 'P', '2019-01-17 14:57:40.263631')]
+            #-- case of list of strings
+            RI_list=[]
+            RIc1_cdr="'2461719487', 'A012006C2A75C3', '011919105300715', null, 'rlgh2', 'N', '0E9A', '1', '0', 'USA', 'IND', '1', 'vzw', '2018-07-25 13:52:00', '2018-07-25 13:52:29', '2018-07-25 18:02:41', '2018-07-25 18:52:29', '1', 'N', 'N', 'N', '-5.0', null, null, null, null, 'P', '2019-01-16 14:57:40.263631'"
+            RIc2_cdr="'2461719488', 'A012006C2A75C3', '011919105300715', null, 'rlgh2', 'N', '0E9A', '1', '0', 'USA', 'IND', '1', 'vzw', '2018-07-26 13:52:00', '2018-07-26 13:52:29', '2018-07-26 18:02:42', '2018-07-26 18:52:29', '1', 'N', 'N', 'N', '-5.0', null, null, null, null, 'P', '2019-01-16 14:57:40.263631'"
+            RI_list.append(RIc1_cdr)
+            RI_list.append(RIc2_cdr)
+            '''  #-- unit test db code END
+
+            #print(RI_list)  #--comment later
+            #print('2-rcd_type=' + rcd_type)
+            if rcd_type == '0' :  #-- Retail International
+                #pg_execute_batchRetIntlNW(RI_list)
+                pg_execute_strListRetIntlNW(RI_list)
+
+            #-- delete the Sqs message retrieved in the batch
+            sqs_delete_msg(mySqsHandle)
+            g_log.info('completed processing, current msg Counts:{} Rows:{} RetI:{}'.format(tl_msg_cnt, tl_row_cnt, retlI_cnt))
+
+        else :
+            g_log.info('The event did not contain any further "Records"')
+            break
+
+    #--end of for loop for entire SQS batch msg
+    g_log.info('Completed the dil_sqs_retail_handler')
+
+def main() :
+    dil_sqs_retail_handler('event', 'context')
+
+if __name__ == '__main__':
+    rv = main()
