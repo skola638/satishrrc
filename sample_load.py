@@ -71,7 +71,7 @@ g_col_dict = {
    'enode_id':str, 'msc_id':str, 'billing_system_id':str \
 }
 
-vdu_columns = ['mdn', 'home_ind', 'orig_cc',
+vdu_columns = ['voice_daily_usage_id','mdn', 'home_ind', 'orig_cc',
                      'term_cc', 'origin_domesitc_indicator', 'term_domesitc_indicator',
                      'call_start_utc', 'counts', 'mou', 'now', 'now', 'billing_system_id']
 group_columns = ['mdn', 'home_ind', 'orig_cc', 'term_cc', 'call_start_utc', 'billing_system_id']
@@ -91,7 +91,7 @@ def make_vdu_data_set(data_frame):
         if term_cc.lower() == "usa":
             term_domesitc_indicator = 0
         now = str(datetime.now())
-        data_row = [mdn, home_ind, orig_cc,
+        data_row = ['', mdn, home_ind, orig_cc,
                      term_cc, origin_domesitc_indicator, term_domesitc_indicator,
                      call_start_utc, counts, '', now, now, billing_system_id]
 
