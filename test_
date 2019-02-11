@@ -1,0 +1,22 @@
+
+def create_retail_international_summary(data=[]):
+    sql_Retail_summary = """INSERT INTO voice_daily_usage \
+            (VOICE_DAILY_USAGE_ID, MDN, ROAMING_INDICATOR, ORIGIN_COUNTRY_CODE, \
+            TERM_COUNTRY_CODE, ORIGIN_DOMESTIC_INDICATOR,\
+            TERM_DOMESTIC_INDICATOR, CALL_DATE, CALL_COUNT,\
+            MOU, TS_INSERTED, TS_MODIFIED, BILLING_SYSTEM_ID) VALUES %s;"""
+
+    if not data or (not isinstance(data, list)):
+        return "Invalid data"
+    query_str = ""
+    for row in data:
+        sql_id = '{}'.format("nextval('voice_daily_usage_id')")
+        sql_id = "432543254352"
+        query_values = "'{}'".format("', '".join(['null' if i == None else str(i) for i in row]))
+        query_str += "(" + sql_id + ", " + query_values + "), "
+        #print query_str)
+    query_str = query_str.strip(", ")
+
+    print(sql_Retail_summary % query_str)
+    print(pg_execute_query_str(sql_Retail_summary % query_str, "NW"))
+
