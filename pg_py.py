@@ -137,13 +137,71 @@ def create_international_cdr(data=[]):
     print sql_RetailIntl % query_str
     #pg_execute_strListRetIntlNW(sql_RetailIntl % query_str)
 
+def create_international_cdr(data=[]):
+    international_cdr_columns = ['international_cdr_id', 'mdn', 'esn_meid', 'dailed_digits',
+                                 'dailed_digits_noprefix', 'terminating_msid', 'switch_id',
+                                 'switch_type', 'cell_site', 'roaming_indicator', 'origin_sid',
+                                 'origin_country_code', 'term_country_code', 'call_direction',
+                                 'carrier_code', 'is_digital', 'begin_time', 'end_time',
+                                 'begin_time_utc', 'end_time_utc', 'mou', 'call_forwarding',
+                                 'three_way_calling', 'call_waiting', 'utc_offset', 'imsi',
+                                 'imei', 'enb_id', 'mscid', 'ts_inserted', 'billing_system_id']
+
+    sql_Retail_Intl = """INSERT INTO network_own.international_cdr \
+          (INTERNATIONAL_CDR_ID, MDN, ESN_MEID, DIALED_DIGITS, DIALED_DIGITS_NOPREFIX,\
+           TERMINATING_MSID, SWITCH_ID, SWITCH_TYPE, CELL_SITE, ROAMING_INDICATOR, ORIGIN_SID,\
+          ORIGIN_COUNTRY_CODE, TERM_COUNTRY_CODE, CALL_DIRECTION, CARRIER_CODE, IS_DIGITAL\
+          BEGIN_TIME, END_TIME, BEGIN_TIME_UTC, END_TIME_UTC, MOU, \
+          CALL_FORWARDING, THREE_WAY_CALLING, CALL_WAITING, UTC_OFFSET, IMSI, \
+          IMEI, ENB_ID, MSCID, BILLING_SYSTEM_ID, TS_INSERTED) VALUES %s"""
+
+    if not data or (not isinstance(data, list)):
+        return "Invalid data"
+    query_str = ""
+    for row in data:
+        sql_id = '{}'.format("nextval('international_cdr_id')")
+        query_values = "'{}'".format("', '".join(['null' if i == None else str(i) for i in row]))
+        query_str += "(" + sql_id + ", " + query_values + "), "
+        #print query_str
+
+    print sql_Retail_Intl % query_str
+    #pg_execute_strListRetIntlNW(sql_RetailIntl % query_str)
+
+def create_international_summary(data=[]):
+    sql_Retail_summary = """INSERT INTO network_own.voice_daily_usage \
+            (VOICE_DAILY_USAGE_ID, MDN, ROAMING_INDICATOR, ORIGIN_COUNTRY_CODE, \
+            TERM_COUNTRY_CODE, ORIGIN_DOMESTIC_INDICATOR,\
+            TERM_DOMESTIC_INDICATOR, CALL_DATE, CALL_COUNT,\
+            MOU, TS_INSERTED, TS_MODIFIED, BILLING_SYSTEM_ID), VALUES %s"""
+
+    if not data or (not isinstance(data, list)):
+        return "Invalid data"
+    query_str = ""
+    for row in data:
+        sql_id = '{}'.format("nextval('voice_daily_usage_id')")
+        query_values = "'{}'".format("', '".join(['null' if i == None else str(i) for i in row]))
+        query_str += "(" + sql_id + ", " + query_values + "), "
+        #print query_str
+
+    print sql_Retail_summary % query_str
+    #pg_execute_query_str(sql_Retail_summary % query_str)
+
 
 
 
 
 data = [('2461719485', 'A012006C2A75C3', '011919105300715', None, 'rlgh2', 'N', '0E9A', '1', '0', 'USA', 'IND', '1', 'vzw', '2018-07-25 13:52:00', '2018-07-25 13:52:29', '2018-07-25 18:52:00', '2018-07-25 18:52:29', '1', 'N', 'N', 'N', -5, None, None, None, None, 'P', '2019-01-16 14:57:40.263631'),
         ('2461719486', 'A012006C2A75C3', '011919105300715', None, 'rlgh2', 'N', '0E9A', '1', '0', 'USA', 'IND', '1', 'vzw', '2018-07-26 13:52:00', '2018-07-26 13:52:29', '2018-07-26 18:52:00', '2018-07-26 18:52:29', '1', 'N', 'N', 'N', -6, None, None, None, None, 'P', '2019-01-17 14:57:40.263631')]
+
+
+data2 = [['2461719485', '1', 'USA', 'IND', '1', '0', '2018-07-25 13:52:29', '2', '1', '2019-01-16 14:57:40.263631', '2019-01-16 14:57:40.263631', '1'],
+         ['2461719486', '0', 'USA', 'IND', '1', '0', '2018-07-26 13:52:29', '2', '1', '2019-01-17 14:57:40.263631', '2019-01-17 14:57:40.263631', '1']]
+
 create_international_cdr(data)
+print("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+create_international_summary(data2)
+
+
 
 
 
