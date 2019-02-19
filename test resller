@@ -1,17 +1,17 @@
-#*******************************************************************************
-#* Enforce (C) Copyright 2018 Verizon Wireless. All rights reserved.
-#*******************************************************************************
-#*
-#* Module:        Load Retail Cdrs Handler`
-#*
-#* Version:       1.00
-#*
-#* Modifications: 13-FEB-2019 -- Satish : Initial version for EC2
-#*                13-FEB-2019 -- THOM4PA: Modified for Lambda
-#*
-#* NOTES:
-#*
-#*******************************************************************************
+# *******************************************************************************
+# * Enforce (C) Copyright 2018 Verizon Wireless. All rights reserved.
+# *******************************************************************************
+# *
+# * Module:        Load Retail Cdrs Handler`
+# *
+# * Version:       1.00
+# *
+# * Modifications: 13-FEB-2019 -- Satish : Initial version for EC2
+# *                13-FEB-2019 -- THOM4PA: Modified for Lambda
+# *
+# * NOTES:
+# *
+# *******************************************************************************
 
 import os
 import sys
@@ -23,9 +23,9 @@ from common import log as logger
 from datetime import datetime, timedelta
 from common import rds_pg
 
-#*******************************************************************************
-#* Globals
-#*******************************************************************************
+# *******************************************************************************
+# * Globals
+# *******************************************************************************
 
 ### Set ENV variables
 
@@ -33,198 +33,199 @@ from common import rds_pg
 g_proxy_env = os.environ['PROXY_ENV']
 set_proxy = 'prod' if g_proxy_env.upper() == 'PROD' else 'nonprod'
 
-if set_proxy == 'prod' :
-	 ## PROD (stg, ple and prod)
-	 os.environ['NO_PROXY']    = '169.254.169.254'
-	 os.environ['http_proxy']  = 'http://vzproxy.verizon.com:80'
-	 os.environ['https_proxy'] = 'http://vzproxy.verizon.com:80'
-	 os.environ['HTTP_PROXY']  = 'http://vzproxy.verizon.com:80'
-	 os.environ['HTTPS_PROXY'] = 'http://vzproxy.verizon.com:80'
+if set_proxy == 'prod':
+    ## PROD (stg, ple and prod)
+    os.environ['NO_PROXY'] = '169.254.169.254'
+    os.environ['http_proxy'] = 'http://vzproxy.verizon.com:80'
+    os.environ['https_proxy'] = 'http://vzproxy.verizon.com:80'
+    os.environ['HTTP_PROXY'] = 'http://vzproxy.verizon.com:80'
+    os.environ['HTTPS_PROXY'] = 'http://vzproxy.verizon.com:80'
 else:
-	 ## Nonprod
-	 os.environ['https_proxy'] = 'http://proxy.ebiz.verizon.com:80'
-	 os.environ['http_proxy']  = 'http://proxy.ebiz.verizon.com:80'
-	 os.environ['NO_PROXY']    = '169.254.169.254'
-
+    ## Nonprod
+    os.environ['https_proxy'] = 'http://proxy.ebiz.verizon.com:80'
+    os.environ['http_proxy'] = 'http://proxy.ebiz.verizon.com:80'
+    os.environ['NO_PROXY'] = '169.254.169.254'
 
 ### Get ENV variables
 
 ## Postgres ENV variables
-db_host     = os.environ['DB_HOST']
-db_dbname   = os.environ['DB_NAME']
-db_port     = os.environ['DB_PORT']
-db_user     = os.environ['DB_USER']
+db_host = os.environ['DB_HOST']
+db_dbname = os.environ['DB_NAME']
+db_port = os.environ['DB_PORT']
+db_user = os.environ['DB_USER']
 db_password = os.environ['DB_PWD']
 db_connect_timeout = os.environ['DB_CONNECT_TIMEOUT']
 db_ssl = os.environ['DB_SSL']
 
 ## Logging ENV variables
 g_env_disable_logging = os.environ['LOGGING_DISABLE']
-g_env_logging_level   = os.environ['LOGGING_LEVEL']
+g_env_logging_level = os.environ['LOGGING_LEVEL']
 
 g_debug_ind = True if g_env_logging_level.upper() == 'DEBUG' else False
 
 ## Configure the logger to write to stdout (config 1)
 g_log = logger.init_config_1(g_env_logging_level)
 
-
 ## Pandas column definitions
 
 ## List of output canonical form column names for a transformed CDR
-g_col_list = [ \
-	 'rcd_type', 'id', 'company_id', 'mdn', 'esn', 'dialed_digits', 'term_min', 'switch_id', 'switch_type', 'cell_site', \
-	 'home_ind', 'orig_sid', 'orig_cc', 'term_cc', 'call_dirtion', 'carrier_code', 'answer_time', 'release_time', 'call_start_utc', \
-	 'call_end_utc', 'call_dur_mou', 'call_fwd_ind', 'three_way_call_ind', 'call_wait_ind', 'utc_offset_db', 'imsi', 'imei', \
-	 'enode_id', 'msc_id' \
-]
-
+g_col_list = ["id", "company_id", "mdn", "device_id", "dialed_digits", "terminating_msid", "switch_id",\
+             "switch_type", "cell_site", "roaming_indicator", "origin_sid", "origin_country_code",\
+             "term_country_code", "call_direction", "carrier_code", "begin_time", "end_time",\
+             "begin_time_utc", "end_time_utc", "mou", "call_forwarding", "three_way_calling",\
+             "call_waiting", "utc_offset", "imsi", "imei", "enb_id", "mscid", "ts_inserted"]
 
 g_col_dict = {
-	 'rcd_type':str, 'id':str, 'company_id':str, 'mdn':str, 'esn':str, 'dialed_digits':str, 'term_min':str, 'switch_id':str, \
-	 'switch_type':str, 'cell_site':str, 'home_ind':str, 'orig_sid':str, 'orig_cc':str, 'term_cc':str, 'call_dirtion':str, \
-	 'carrier_code':str, 'answer_time':str, 'release_time':str, 'call_start_utc':str, 'call_end_utc':str, 'call_dur_mou':str, \
-	 'call_fwd_ind':str, 'three_way_call_ind':str, 'call_wait_ind':str, 'utc_offset_db':str, 'imsi':str, 'imei':str, \
-	 'enode_id':str, 'msc_id':str \
-}
-
+    'rcd_type': str, 'id': str, 'company_id': str, 'mdn': str, 'esn': str, 'dialed_digits': str, 'term_min': str,
+    'switch_id': str, \
+    'switch_type': str, 'cell_site': str, 'home_ind': str, 'orig_sid': str, 'orig_cc': str, 'term_cc': str,
+    'call_dirtion': str, \
+    'carrier_code': str, 'answer_time': str, 'release_time': str, 'call_start_utc': str, 'call_end_utc': str,
+    'call_dur_mou': str, \
+    'call_fwd_ind': str, 'three_way_call_ind': str, 'call_wait_ind': str, 'utc_offset_db': str, 'imsi': str,
+    'imei': str, \
+    'enode_id': str, 'msc_id': str \
+    }
 
 ## voice_daily_usage table columns for dataframe
-vdu_columns = [\
-	 'mdn', 'home_ind', 'orig_cc','term_cc', 'origin_domesitc_indicator', 'term_domesitc_indicator',
-	 'call_start_utc', 'counts', 'mou', 'ts_inserted', 'ts_modified' \
-]
-
+vdu_columns = ['mdn', 'roaming_indicator', 'origin_country_code', 'term_country_code',
+    'origin_domesitc_indicator', 'term_domesitc_indicator',
+    'begin_time_utc', 'counts', 'mou', 'ts_inserted', 'ts_modified'
+    ]
 
 ## Group the columns and count the repeated records.
-group_columns = [\
-	 'mdn', 'home_ind', 'orig_cc', 'term_cc','call_start_utc' \
-]
+group_columns = ['mdn', 'roaming_indicator', 'origin_country_code', 'term_country_code', 'begin_time_utc']
 
 
-#*******************************************************************************
-#* FUNCTION: create_retail_summary_data_set
-#* Making groupby for df's to derive field gor MOU,CALL_COUNT                            
-#* This is setting up sequence of columns form sqs to tables in respective DB
-#*******************************************************************************
+# *******************************************************************************
+# * FUNCTION: create_retail_summary_data_set
+# * Making groupby for df's to derive field gor MOU,CALL_COUNT
+# * This is setting up sequence of columns form sqs to tables in respective DB
+# *******************************************************************************
 def create_retail_summary_data_set(data_frame):
+    # Preparing the retail data summary based on CDR from event
 
-		# Preparing the retail data summary based on CDR from event
+    # counting the cmmon repeated rows
+    count_df = data_frame.groupby(group_columns).size().reset_index(name='counts')
 
-		#counting the cmmon repeated rows
-		count_df = data_frame.groupby(group_columns).size().reset_index(name='counts')
+    # summarising the mou for repeated rows
+    mou_df = pd.to_numeric(data_frame.call_dur_mou).groupby([ \
+        data_frame.mdn, data_frame.home_ind, data_frame.orig_cc, \
+        data_frame.term_cc, data_frame.call_start_utc]).sum().reset_index(name='mou')
 
-		#summarising the mou for repeated rows
-		mou_df = pd.to_numeric(data_frame.call_dur_mou).groupby([\
-			data_frame.mdn, data_frame.home_ind, data_frame.orig_cc,\
-			data_frame.term_cc, data_frame.call_start_utc]).sum().reset_index(name='mou')
+    # merging the two data frames
+    df = pd.merge(count_df, mou_df, on=group_columns)
 
-		#merging the two data frames
-		df = pd.merge(count_df, mou_df, on=group_columns)
-		 
-		vdu_dfs = []
-		for index, row in enumerate(df.values):
-				mdn, home_ind, orig_cc, term_cc, call_start_utc, counts, mou = row
+    vdu_dfs = []
+    for index, row in enumerate(df.values):
+        mdn, home_ind, orig_cc, term_cc, call_start_utc, counts, mou = row
 
-				#deciding the origin_domesitc_indicator based on logic
-				origin_domesitc_indicator = 1
-				if orig_cc.lower() == "usa":
-						origin_domesitc_indicator = 0
+        # deciding the origin_domesitc_indicator based on logic
+        origin_domesitc_indicator = 1
+        if orig_cc.lower() == "usa":
+            origin_domesitc_indicator = 0
 
-				#deciding the term_domesitc_indicator based on logic
-				term_domesitc_indicator = 1
-				if term_cc.lower() == "usa":
-						term_domesitc_indicator = 0
+        # deciding the term_domesitc_indicator based on logic
+        term_domesitc_indicator = 1
+        if term_cc.lower() == "usa":
+            term_domesitc_indicator = 0
 
-				now = str(datetime.utcnow())
-				vdu_df_row = [mdn, home_ind, orig_cc,
-										 term_cc, origin_domesitc_indicator, term_domesitc_indicator,
-										 call_start_utc, counts, mou, now, now]
+        now = str(datetime.utcnow())
+        vdu_df_row = [mdn, home_ind, orig_cc,
+                      term_cc, origin_domesitc_indicator, term_domesitc_indicator,
+                      call_start_utc, counts, mou, now, now]
 
-				vdu_df = pd.DataFrame([vdu_df_row], columns=vdu_columns)
-				vdu_dfs.append(vdu_df)
+        vdu_df = pd.DataFrame([vdu_df_row], columns=vdu_columns)
+        vdu_dfs.append(vdu_df)
 
-		vdu_dfs = pd.concat(vdu_dfs)
-		return vdu_dfs
+    vdu_dfs = pd.concat(vdu_dfs)
+    return vdu_dfs
+
 
 ## Handler - Called from main
 
-#*******************************************************************************
-#* FUNCTION: Handler                     
-#* The handler event received is based on a trigger received from an event
-#* on the Retail SQS queue.  The event is one message off the queue.
-#* The payload in the message contains 1-to-many CDRs to be inserted into the DB
-#*******************************************************************************
+# *******************************************************************************
+# * FUNCTION: Handler
+# * The handler event received is based on a trigger received from an event
+# * on the Retail SQS queue.  The event is one message off the queue.
+# * The payload in the message contains 1-to-many CDRs to be inserted into the DB
+# *******************************************************************************
 
 def load_retail(event, context):
+    global g_log
 
-		global g_log
+    g_log.info('Starting load_retail handler')
 
-		g_log.info('Starting load_retail handler')
+    ## Max message receive cnt is 1 (ie one msg per event)
+    max_msg_rcv_cnt = 1
 
-		## Max message receive cnt is 1 (ie one msg per event)
-		max_msg_rcv_cnt=1
+    ## Counter for CDRs in the msg payload
+    cdr_cnt = 0
 
-		## Counter for CDRs in the msg payload
-		cdr_cnt=0
+    ## create a list to hold the CDRs
+    # 0 Retail1,2Reseller domestic, international
+    retail_cdrs = []
+    reseller_domestic_cdrs = []
+    reseller_international_cdrs = []
+    unknown_cdrs = []
 
-		## create a list to hold the CDRs
-		#0 Retail1,2Reseller domestic, international
-		retail_cdrs = []
-		reseller_domestic_cdrs =[]
-		reseller_international_cdrs =[]
-		unknown_cdrs = []
+    if 'Records' in event:
+
+        for i in range(max_msg_rcv_cnt):
+            try:
+                msg_cdrs = event['Records'][i]['body']
+                meta_rcd_type = event['Records'][i]['messageAttributes']['RcdType']['stringValue']
+                cdrs = msg_cdrs.split('\n')
+                for cdr in cdrs:
+                    if len(cdr) != 0:
+                        cdr_cnt += 1
+                        cdr_list = cdr_list.split("|")[:-1]
+                        if meta_rcd_type == 1:
+                            reseller_domestic_cdrs.append(cdr_list)
+                        elif meta_rcd_type == 2:
+                            reseller_international_cdrs.append(cdr_list)
+                        else:
+                            unknown_cdrs.append(cdr_list)
+                    g_log.debug('cdr:{}'.format(cdr))
+
+            except Exception as err:
+                break
+
+        g_log.info('No more msgs in batch. Rcd_type:{} Total CDRs in the message:{}'.format(meta_rcd_type, cdr_cnt))
+        # Dumping data into DB
+        data_dumped = rds_pg.create_reseller_cdr(reseller_domestic_cdrs, 1)
+        if not data_dumped:
+            g_log.debug('load_reseller cdr domestic Failed')
+
+        data_dumped = rds_pg.create_reseller_cdr(reseller_international_cdrs, 2)
+        if not data_dumped:
+            g_log.debug('load_reseller cdr international Failed')
+
+        #reseller_domestic_cdrs.extend(reseller_international_cdrs)
+        df = pd.DataFrame(reseller_domestic_cdrs, columns=g_col_list)
+        # preparing the data to dump into summary table
+        vdu_dfs = create_retail_summary_data_set(df)
+        # Dumping data into DB
+        data_dumped = rds_pg.create_retail_summary(vdu_dfs.values.tolist())
+        if not data_dumped:
+            g_log.debug('load_retail summary Failed')
 
 
-        
-		if 'Records' in event:
-
-			for i in range(max_msg_rcv_cnt):
-				try:
-					msg_cdrs=event['Records'][i]['body']
-					meta_rcd_type=event['Records'][i]['messageAttributes']['RcdType']['stringValue']
-					cdrs=msg_cdrs.split('\n')
-					for cdr in cdrs:
-						if len(cdr) != 0:
-							cdr_cnt +=1
-							cdr_list = cdr_list.split("|")[:-1]
-							if cdr_list[0] == 1:
-								reseller_domestic_cdrs.append(cdr_list)
-							elif cdr_list[0] == 2:
-								reseller_international_cdrs.append(cdr_list)
-							else:
-								unknown_cdrs.append(cdr_list)
-						g_log.debug('cdr:{}'.format(cdr))
-
-				except Exception as err:
-						break
+        df = pd.DataFrame(reseller_international_cdrs, columns=g_col_list)
+        # preparing the data to dump into summary table
+        vdu_dfs = create_retail_summary_data_set(df)
+        # Dumping data into DB
+        data_dumped = rds_pg.create_retail_summary(vdu_dfs.values.tolist())
+        if not data_dumped:
+            g_log.debug('load_retail summary Failed')
 
 
-			#Dumping data into DB
-			data_dumped = rds_pg.create_reseller_domestic_cdr(reseller_domestic_cdrs)
-			if not data_dumped:
-					g_log.debug('load_reseller cdr Failed')
+        g_log.info('Completed load_retail handler')
 
-			data_dumped = rds_pg.create_reseller_international_cdr(reseller_international_cdrs)
-			if not data_dumped:
-					g_log.debug('load_reseller cdr Failed')
+    else:
+        g_log.info('The envent did not contain and entry called "Records"')
 
-			 
-			g_log.info('No more msgs in batch. Rcd_type:{} Total CDRs in the message:{}'.format(meta_rcd_type,cdr_cnt))
 
-			df = pd.DataFrame(reseller_domestic_cdrs, columns=g_col_list)
-
-			#preparing the data to dump into summary table
-			vdu_dfs = create_retail_summary_data_set(df) 
-
-			#Dumping data into DB
-			data_dumped = rds_pg.create_retail_summary(vdu_dfs.values.tolist())
-			if not data_dumped:
-				g_log.debug('load_retail summary Failed')
-
-			g_log.info('Completed load_retail handler')
-
-		else:
-			g_log.info('The envent did not contain and entry called "Records"')
 """
 fil = open("filename", "r")
 test_data = {"Records": [{"body": fil.read(), "messageAttributes": {'RcdType': {"stringValue": 1}}}]
